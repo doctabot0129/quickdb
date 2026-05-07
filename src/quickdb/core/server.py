@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List
 
 import pandas as pd
+from urllib.parse import quote_plus
 import sqlalchemy as sa
 from dotenv import load_dotenv
 
@@ -10,7 +11,7 @@ from quickdb.core.database import SQLDatabase
 from quickdb.core.query_mgr import SQLQueryManager
 from quickdb.core.utils import resolve_project_root
 
-load_dotenv()
+load_dotenv() 
 
 
 class Server:
@@ -27,7 +28,7 @@ class Server:
             drivername=self.driver_name,
             host=server_name,
             username=username,
-            password=password,
+            password=quote_plus(password, safe='/:?=&,') if password else None,
             port=port,
             database=database,
         )
@@ -129,3 +130,4 @@ class SQLServer(Server):
 
         result = self.connection.execute(sa.text('SELECT name FROM sys.databases'))
         return [database[0] for database in result.fetchall()]
+
