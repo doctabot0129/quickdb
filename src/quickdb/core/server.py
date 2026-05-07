@@ -41,7 +41,7 @@ class Server:
             self.load_databases(self.my_databases, full_init=True)
             
     def init_query_dirs(self):
-        self.test_query_dir = resolve_project_root() / 'test_queries'
+        self.test_query_dir = resolve_project_root() / 'queries' / 'test'
         self.query_dir = resolve_project_root() / 'queries'
         self.test_query_dir.mkdir(exist_ok=True)
         self.query_dir.mkdir(exist_ok=True)
