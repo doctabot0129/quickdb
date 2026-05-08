@@ -276,3 +276,8 @@ def test_stub_generator_returns_path_to_written_file():
 
         assert result.is_absolute()
         assert result.exists()
+
+
+def test_stub_generator_importable_from_quickdb():
+    from quickdb import StubGenerator  # noqa: F401
+    assert StubGenerator is not None
