@@ -4,13 +4,10 @@ from typing import List
 
 import pandas as pd
 import sqlalchemy as sa
-from dotenv import load_dotenv
 
 from quickdb.core.database import SQLDatabase
 from quickdb.core.query_mgr import SQLQueryManager
 from quickdb.core.utils import resolve_project_root
-
-load_dotenv() 
 
 
 class Server(ABC):
@@ -28,7 +25,6 @@ class Server(ABC):
             host=server_name,
             username=username,
             password=password,
-            # password=quote_plus(password, safe='/:?=&,') if password else None,
             port=port,
             database=database,
         )
@@ -87,6 +83,16 @@ class Server(ABC):
         for database in (database_list or []):
             self.load_database(database_name=database, full_init=full_init)
 
+    def close(self) -> None:
+        self.connection.close()
+        self.engine.dispose()
+
+    def __enter__(self) -> 'Server':
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
     def get_query_mgr(self, sql_file_path: Path) -> SQLQueryManager:
         query_manager = SQLQueryManager(sql_file_path)
         return query_manager
@@ -133,10 +139,12 @@ class SQLServer(Server):
 
 if __name__ == '__main__':
     import os
-    server = MariaDBServer(
+    from dotenv import load_dotenv
+    load_dotenv()
+    with MariaDBServer(
         server_name="crm-mysql-01.procarerx.com",
         username=os.getenv('CRM_MY_SQL_USERNAME'),
         password=os.getenv('CRM_MY_SQL_PASSWORD'),
         port=int(os.getenv('CRM_MY_SQL_PORT', 3306)),
-    )
-    print(server.load_database_list())
+    ) as server:
+        print(server.load_database_list())
