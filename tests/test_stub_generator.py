@@ -31,3 +31,49 @@ def test_class_to_filename_mariadb():
 
 def test_class_to_filename_simple():
     assert _class_to_filename('MyServer') == 'my_server.pyi'
+
+
+from quickdb.scripts.stub_generator import _generate_table_stub
+
+
+def test_table_stub_class_name():
+    result = _generate_table_stub('cases', ['id', 'name'])
+    assert 'class _CasesTable(SQLTable):' in result
+
+
+def test_table_stub_snake_case_name():
+    result = _generate_table_stub('case_updates', ['id'])
+    assert 'class _CaseUpdatesTable(SQLTable):' in result
+
+
+def test_table_stub_column_attrs():
+    result = _generate_table_stub('cases', ['id', 'name', 'entered_date'])
+    assert '    id: str' in result
+    assert '    name: str' in result
+    assert '    entered_date: str' in result
+
+
+def test_table_stub_literal_fields_in_limited_query():
+    result = _generate_table_stub('cases', ['id', 'name'])
+    assert "Literal['id', 'name']" in result
+    assert '-> pd.DataFrame: ...' in result
+
+
+def test_table_stub_skips_python_keywords():
+    result = _generate_table_stub('orders', ['id', 'from', 'return'])
+    assert '    id: str' in result
+    assert '    from: str' not in result
+    assert '    return: str' not in result
+
+
+def test_table_stub_skips_non_identifiers():
+    result = _generate_table_stub('orders', ['id', '1bad', 'has space'])
+    assert '    id: str' in result
+    assert '    1bad: str' not in result
+    assert '    has space: str' not in result
+
+
+def test_table_stub_no_valid_columns_uses_generic_fields_type():
+    result = _generate_table_stub('orders', ['from', 'return'])
+    assert 'list[str] | None' in result
+    assert 'Literal' not in result
