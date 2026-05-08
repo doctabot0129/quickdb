@@ -169,3 +169,109 @@ def test_server_stub_skips_keyword_db_names():
     assert '    other: SQLDatabase' in result
     assert '    from: _FromDb' not in result
     assert '    class: SQLDatabase' not in result
+
+
+import tempfile
+from unittest.mock import MagicMock, patch
+
+from quickdb.core.server import MariaDBServer
+from quickdb.scripts.stub_generator import StubGenerator
+
+
+class SuiteCRMServer(MariaDBServer):
+    """Test double — represents a child server subclass."""
+
+
+def _make_test_server() -> SuiteCRMServer:
+    inst = object.__new__(SuiteCRMServer)
+    inst.my_databases = ['suitecrm']
+    inst.all_databases_list = ['suitecrm', 'information_schema', 'mysql']
+    inst.connection = MagicMock()
+    return inst
+
+
+def test_stub_generator_writes_pyi_file():
+    server = _make_test_server()
+    with (
+        patch('quickdb.scripts.stub_generator.SQLDatabase') as MockDb,
+        patch('quickdb.scripts.stub_generator.SQLTable') as MockTable,
+        tempfile.TemporaryDirectory() as tmpdir,
+    ):
+        MockDb.return_value.all_tables_list = ['cases']
+        MockTable.return_value.all_columns_list = ['id', 'name']
+
+        output = StubGenerator(server, output_path=tmpdir).generate()
+
+        assert output.exists()
+        assert output.suffix == '.pyi'
+        assert output.name == 'suite_crm_server.pyi'
+
+
+def test_stub_generator_deep_db_in_output():
+    server = _make_test_server()
+    with (
+        patch('quickdb.scripts.stub_generator.SQLDatabase') as MockDb,
+        patch('quickdb.scripts.stub_generator.SQLTable') as MockTable,
+        tempfile.TemporaryDirectory() as tmpdir,
+    ):
+        MockDb.return_value.all_tables_list = ['cases']
+        MockTable.return_value.all_columns_list = ['id', 'name']
+
+        output = StubGenerator(server, output_path=tmpdir).generate()
+        content = output.read_text()
+
+        assert 'class _CasesTable(SQLTable):' in content
+        assert 'class _SuitecrmDb(SQLDatabase):' in content
+        assert '    suitecrm: _SuitecrmDb' in content
+        assert "Literal['id', 'name']" in content
+
+
+def test_stub_generator_surface_dbs_in_output():
+    server = _make_test_server()
+    with (
+        patch('quickdb.scripts.stub_generator.SQLDatabase') as MockDb,
+        patch('quickdb.scripts.stub_generator.SQLTable') as MockTable,
+        tempfile.TemporaryDirectory() as tmpdir,
+    ):
+        MockDb.return_value.all_tables_list = ['cases']
+        MockTable.return_value.all_columns_list = ['id']
+
+        output = StubGenerator(server, output_path=tmpdir).generate()
+        content = output.read_text()
+
+        assert '    information_schema: SQLDatabase' in content
+        assert '    mysql: SQLDatabase' in content
+        assert 'add to my_databases for full stubs' in content
+
+
+def test_stub_generator_correct_parent_import():
+    server = _make_test_server()
+    with (
+        patch('quickdb.scripts.stub_generator.SQLDatabase') as MockDb,
+        patch('quickdb.scripts.stub_generator.SQLTable') as MockTable,
+        tempfile.TemporaryDirectory() as tmpdir,
+    ):
+        MockDb.return_value.all_tables_list = []
+        MockTable.return_value.all_columns_list = []
+
+        output = StubGenerator(server, output_path=tmpdir).generate()
+        content = output.read_text()
+
+        assert 'from quickdb.core.server import MariaDBServer' in content
+        assert 'class SuiteCRMServer(MariaDBServer):' in content
+
+
+def test_stub_generator_returns_path_to_written_file():
+    server = _make_test_server()
+    with (
+        patch('quickdb.scripts.stub_generator.SQLDatabase') as MockDb,
+        patch('quickdb.scripts.stub_generator.SQLTable') as MockTable,
+        tempfile.TemporaryDirectory() as tmpdir,
+    ):
+        MockDb.return_value.all_tables_list = []
+        MockTable.return_value.all_columns_list = []
+
+        result = StubGenerator(server, output_path=tmpdir).generate()
+
+        assert result.is_absolute()
+        assert result.exists()

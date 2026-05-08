@@ -68,6 +68,69 @@ def _generate_file_header(parent_module: str, parent_class_name: str) -> str:
     )
 
 
+class StubGenerator:
+    def __init__(self, server: Server, output_path: str | Path) -> None:
+        self.server = server
+        self.output_path = Path(output_path)
+
+    def generate(self) -> Path:
+        deep_schema: dict[str, dict[str, list[str]]] = {}
+        for db_name in self.server.my_databases:
+            db = SQLDatabase(self.server.connection, db_name)
+            deep_schema[db_name] = {
+                table_name: SQLTable(self.server.connection, db_name, table_name).all_columns_list
+                for table_name in db.all_tables_list
+            }
+
+        surface_dbs = [
+            db for db in self.server.all_databases_list
+            if db not in self.server.my_databases
+        ]
+
+        parent_cls = type(self.server).__bases__[0]
+        server_class_name = type(self.server).__name__
+
+        content = self._build_content(
+            server_class_name=server_class_name,
+            parent_class_name=parent_cls.__name__,
+            parent_module=parent_cls.__module__,
+            deep_schema=deep_schema,
+            surface_dbs=surface_dbs,
+        )
+
+        output_file = self.output_path / _class_to_filename(server_class_name)
+        output_file.write_text(content, encoding='utf-8')
+        return output_file
+
+    def _build_content(
+        self,
+        server_class_name: str,
+        parent_class_name: str,
+        parent_module: str,
+        deep_schema: dict[str, dict[str, list[str]]],
+        surface_dbs: list[str],
+    ) -> str:
+        sep = '─' * 50
+        parts: list[str] = [_generate_file_header(parent_module, parent_class_name)]
+
+        if deep_schema:
+            parts += [f'# ── Deep stubs (my_databases) {sep}', '']
+            for db_name, tables in deep_schema.items():
+                for table_name, columns in tables.items():
+                    parts += [_generate_table_stub(table_name, columns), '']
+                parts += [_generate_database_stub(db_name, list(tables.keys())), '']
+
+        parts += [f'# ── Server {sep}', '']
+        parts.append(_generate_server_stub(
+            server_class_name=server_class_name,
+            parent_class_name=parent_class_name,
+            deep_db_names=list(deep_schema.keys()),
+            surface_db_names=surface_dbs,
+        ))
+
+        return '\n'.join(parts)
+
+
 def _generate_server_stub(
     server_class_name: str,
     parent_class_name: str,
