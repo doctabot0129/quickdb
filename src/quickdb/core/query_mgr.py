@@ -160,24 +160,29 @@ class SQLQueryManager:
         return self.base_query.strip()
 
     def declare_varchar(self, var_name: str, var_val: str) -> 'SQLQueryManager':
+        if not re.fullmatch(r'[A-Za-z0-9_]+', var_name):
+            raise ValueError(f'Invalid variable name: {var_name!r}')
+        escaped_val = var_val.replace("'", "''")
 
         match = re.search(rf'DECLARE @{var_name.upper()} VARCHAR\((\d+)\)', self.base_query)
         if match:
             length = int(match.group(1))
             self.base_query = re.sub(
                 rf"DECLARE @{var_name.upper()} VARCHAR\(\d+\) = '.*'",
-                f"DECLARE @{var_name.upper()} VARCHAR({length}) = '{var_val}'",
+                f"DECLARE @{var_name.upper()} VARCHAR({length}) = '{escaped_val}'",
                 self.base_query,
             )
         else:
             self.base_query = (
-                f"DECLARE @{var_name.upper()} VARCHAR(255) = '{var_val}'\n" + self.base_query
+                f"DECLARE @{var_name.upper()} VARCHAR(255) = '{escaped_val}'\n" + self.base_query
             )
 
         return self
 
     def declare_start_date(self, start_date: str) -> 'SQLQueryManager':
         """Declare a start date variable in format YYYY-MM-DD."""
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', start_date):
+            raise ValueError(f'Invalid date format: {start_date!r} — expected YYYY-MM-DD')
         if 'DECLARE @STARTDATE DATE =' in self.base_query:
             self.base_query = re.sub(
                 r"DECLARE @STARTDATE DATE = '.*'",
@@ -190,6 +195,8 @@ class SQLQueryManager:
 
     def declare_end_date(self, end_date: str) -> 'SQLQueryManager':
         """Declare a end date variable in format YYYY-MM-DD."""
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', end_date):
+            raise ValueError(f'Invalid date format: {end_date!r} — expected YYYY-MM-DD')
         if 'DECLARE @ENDDATE DATE =' in self.base_query:
             self.base_query = re.sub(
                 r"DECLARE @ENDDATE DATE = (?:CAST\(GETDATE\(\) AS DATE\)|'.*')",
