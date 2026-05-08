@@ -15,8 +15,8 @@ class SQLTable:
     def get_column_list(self) -> List[str]:
         result = self.connection.execute(
             sa.text(
-                f"SELECT COLUMN_NAME FROM {self.database_name}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{self.table_name}'"
-            )
+                f'SELECT COLUMN_NAME FROM {self.database_name}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = :table_name'
+            ).bindparams(table_name=self.table_name)
         )
         return [column[0] for column in result.fetchall()]
 
