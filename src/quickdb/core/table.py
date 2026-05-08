@@ -30,17 +30,16 @@ class SQLTable:
         for column in (column_list or []):
             self.load_column(column_name=column)
 
+    def _table_clause(self) -> sa.TextClause:
+        if self.connection.dialect.name == 'mssql':
+            return sa.text(f'{self.database_name}.dbo.{self.table_name}')
+        return sa.text(f'{self.database_name}.{self.table_name}')
+
     def limited_query(
         self, fields: List[str] | None = None, where: List[str] | None = None, limit: int = 10
     ) -> pd.DataFrame:
-
-        fields = ', '.join(fields or ['*'])
-        where = ' AND '.join(where or [])
+        cols = [sa.literal_column(f) for f in (fields or ['*'])]
+        stmt = sa.select(*cols).select_from(self._table_clause()).limit(limit)
         if where:
-            where = f'WHERE {where}'
-        limit = f'TOP {limit}'
-        query_str = (
-            f'SELECT {limit} {fields} FROM {self.database_name}.dbo.{self.table_name} {where}'
-        )
-
-        return pd.read_sql_query(query_str, self.connection)
+            stmt = stmt.where(sa.and_(*[sa.text(c) for c in where]))
+        return pd.read_sql_query(stmt, self.connection)
