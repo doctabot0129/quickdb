@@ -39,6 +39,6 @@ class SQLDatabase:
         else:
             print(f'Table {table_name} not found')
 
-    def load_tables(self, table_list: List[str] = []) -> None:
-        for table in table_list:
+    def load_tables(self, table_list: List[str] | None = None) -> None:
+        for table in (table_list or []):
             self.load_table(table_name=table)

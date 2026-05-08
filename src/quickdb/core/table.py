@@ -26,16 +26,16 @@ class SQLTable:
         else:
             print(f'Column {column_name} not found')
 
-    def load_columns(self, column_list: List[str] = []):
-        for column in column_list:
+    def load_columns(self, column_list: List[str] | None = None):
+        for column in (column_list or []):
             self.load_column(column_name=column)
 
     def limited_query(
-        self, fields: List[str] = ['*'], where: List[str] = [], limit: int = 10
+        self, fields: List[str] | None = None, where: List[str] | None = None, limit: int = 10
     ) -> pd.DataFrame:
 
-        fields = ', '.join(fields)
-        where = ' AND '.join(where)
+        fields = ', '.join(fields or ['*'])
+        where = ' AND '.join(where or [])
         if where:
             where = f'WHERE {where}'
         limit = f'TOP {limit}'

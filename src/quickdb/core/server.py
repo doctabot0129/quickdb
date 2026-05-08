@@ -83,8 +83,8 @@ class Server(ABC):
         except Exception:
             print(f'Database {database_name} not found')
 
-    def load_databases(self, database_list: List[str] = [], full_init: bool = False) -> None:
-        for database in database_list:
+    def load_databases(self, database_list: List[str] | None = None, full_init: bool = False) -> None:
+        for database in (database_list or []):
             self.load_database(database_name=database, full_init=full_init)
 
     def get_query_mgr(self, sql_file_path: Path) -> SQLQueryManager:
