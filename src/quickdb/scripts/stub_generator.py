@@ -74,19 +74,22 @@ def _generate_server_stub(
     deep_db_names: list[str],
     surface_db_names: list[str],
 ) -> str:
+    safe_deep = [n for n in deep_db_names if n.isidentifier() and not keyword.iskeyword(n)]
+    safe_surface = [n for n in surface_db_names if n.isidentifier() and not keyword.iskeyword(n)]
+
     lines = [f'class {server_class_name}({parent_class_name}):']
 
-    if deep_db_names:
+    if safe_deep:
         lines.append('    # fully stubbed')
-        for db_name in deep_db_names:
+        for db_name in safe_deep:
             lines.append(f'    {db_name}: _{_to_pascal_case(db_name)}Db')
 
-    if surface_db_names:
+    if safe_surface:
         lines.append('    # available — add to my_databases for full stubs')
-        for db_name in surface_db_names:
+        for db_name in safe_surface:
             lines.append(f'    {db_name}: SQLDatabase')
 
-    if not deep_db_names and not surface_db_names:
+    if not safe_deep and not safe_surface:
         lines.append('    pass')
 
     return '\n'.join(lines) + '\n'

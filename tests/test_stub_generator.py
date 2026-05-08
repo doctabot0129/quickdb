@@ -161,3 +161,11 @@ def test_server_stub_deep_and_surface_sections():
 def test_server_stub_empty_emits_pass():
     result = _generate_server_stub('MyServer', 'SQLServer', [], [])
     assert '    pass' in result
+
+
+def test_server_stub_skips_keyword_db_names():
+    result = _generate_server_stub('MyServer', 'SQLServer', ['mydb', 'from'], ['other', 'class'])
+    assert '    mydb: _MydbDb' in result
+    assert '    other: SQLDatabase' in result
+    assert '    from: _FromDb' not in result
+    assert '    class: SQLDatabase' not in result
