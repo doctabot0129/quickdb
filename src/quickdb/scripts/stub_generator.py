@@ -47,8 +47,9 @@ def _generate_table_stub(table_name: str, columns: list[str]) -> str:
 
 def _generate_database_stub(db_name: str, table_names: list[str]) -> str:
     class_name = f'_{_to_pascal_case(db_name)}Db'
-    if table_names:
-        body = '\n'.join(f'    {t}: _{_to_pascal_case(t)}Table' for t in table_names)
+    safe_tables = [t for t in table_names if t.isidentifier() and not keyword.iskeyword(t)]
+    if safe_tables:
+        body = '\n'.join(f'    {t}: _{_to_pascal_case(t)}Table' for t in safe_tables)
     else:
         body = '    pass'
     return f'class {class_name}(SQLDatabase):\n{body}\n'

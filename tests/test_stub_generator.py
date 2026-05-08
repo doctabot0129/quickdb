@@ -102,3 +102,10 @@ def test_database_stub_no_tables_emits_pass():
     result = _generate_database_stub('empty_db', [])
     assert 'class _EmptyDbDb(SQLDatabase):' in result
     assert '    pass' in result
+
+
+def test_database_stub_skips_keyword_table_names():
+    result = _generate_database_stub('mydb', ['orders', 'from', 'global'])
+    assert '    orders: _OrdersTable' in result
+    assert '    from: _FromTable' not in result
+    assert '    global: _GlobalTable' not in result
