@@ -77,3 +77,28 @@ def test_table_stub_no_valid_columns_uses_generic_fields_type():
     result = _generate_table_stub('orders', ['from', 'return'])
     assert 'list[str] | None' in result
     assert 'Literal' not in result
+
+
+from quickdb.scripts.stub_generator import _generate_database_stub
+
+
+def test_database_stub_class_name():
+    result = _generate_database_stub('suitecrm', ['cases', 'accounts'])
+    assert 'class _SuitecrmDb(SQLDatabase):' in result
+
+
+def test_database_stub_snake_case_name():
+    result = _generate_database_stub('my_warehouse', ['orders'])
+    assert 'class _MyWarehouseDb(SQLDatabase):' in result
+
+
+def test_database_stub_table_attrs():
+    result = _generate_database_stub('suitecrm', ['cases', 'accounts'])
+    assert '    cases: _CasesTable' in result
+    assert '    accounts: _AccountsTable' in result
+
+
+def test_database_stub_no_tables_emits_pass():
+    result = _generate_database_stub('empty_db', [])
+    assert 'class _EmptyDbDb(SQLDatabase):' in result
+    assert '    pass' in result

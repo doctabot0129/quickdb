@@ -43,3 +43,12 @@ def _generate_table_stub(table_name: str, columns: list[str]) -> str:
 
     body = f'{col_attrs}\n\n{method}' if col_attrs else method
     return f'class {class_name}(SQLTable):\n{body}\n'
+
+
+def _generate_database_stub(db_name: str, table_names: list[str]) -> str:
+    class_name = f'_{_to_pascal_case(db_name)}Db'
+    if table_names:
+        body = '\n'.join(f'    {t}: _{_to_pascal_case(t)}Table' for t in table_names)
+    else:
+        body = '    pass'
+    return f'class {class_name}(SQLDatabase):\n{body}\n'
