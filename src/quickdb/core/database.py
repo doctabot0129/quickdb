@@ -1,8 +1,12 @@
+import logging
 from typing import List
 
 import sqlalchemy as sa
+from sqlalchemy.exc import SQLAlchemyError
 
 from quickdb.core.table import SQLTable
+
+logger = logging.getLogger(__name__)
 
 
 class SQLDatabase:
@@ -21,9 +25,9 @@ class SQLDatabase:
                 sa.text(f'SELECT name FROM {self.database_name}.sys.tables')
             )
             return [table[0] for table in result.fetchall()]
-        except Exception:
-            print(f'Error unable to connect to {self.database_name}')
-            return []
+        except SQLAlchemyError as e:
+            logger.error('Failed to load table list for database %r: %s', self.database_name, e)
+            raise
 
     def load_table(self, table_name: str) -> None:
         if table_name in self.all_tables_list:
@@ -37,7 +41,7 @@ class SQLDatabase:
                 ),
             )
         else:
-            print(f'Table {table_name} not found')
+            raise KeyError(f'Table {table_name!r} not found in {self.database_name!r}')
 
     def load_tables(self, table_list: List[str] | None = None) -> None:
         for table in (table_list or []):

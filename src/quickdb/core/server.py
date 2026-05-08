@@ -1,3 +1,4 @@
+import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List
@@ -8,6 +9,8 @@ import sqlalchemy as sa
 from quickdb.core.database import SQLDatabase
 from quickdb.core.query_mgr import SQLQueryManager
 from quickdb.core.utils import resolve_project_root
+
+logger = logging.getLogger(__name__)
 
 
 class Server(ABC):
@@ -66,18 +69,15 @@ class Server(ABC):
         Args:
             database_name (str): Database name to load
         """
-        try:
-            setattr(
-                self,
-                database_name,
-                SQLDatabase(
-                    connection=self.connection,
-                    database_name=database_name,
-                    full_init=full_init,
-                ),
-            )
-        except Exception:
-            print(f'Database {database_name} not found')
+        setattr(
+            self,
+            database_name,
+            SQLDatabase(
+                connection=self.connection,
+                database_name=database_name,
+                full_init=full_init,
+            ),
+        )
 
     def load_databases(self, database_list: List[str] | None = None, full_init: bool = False) -> None:
         for database in (database_list or []):
