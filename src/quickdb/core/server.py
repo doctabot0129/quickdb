@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import List
 
 import pandas as pd
-from urllib.parse import quote_plus
 import sqlalchemy as sa
 from dotenv import load_dotenv
 
@@ -28,7 +27,8 @@ class Server(ABC):
             drivername=self.driver_name,
             host=server_name,
             username=username,
-            password=quote_plus(password, safe='/:?=&,') if password else None,
+            password=password,
+            # password=quote_plus(password, safe='/:?=&,') if password else None,
             port=port,
             database=database,
         )
@@ -41,10 +41,10 @@ class Server(ABC):
             self.load_databases(self.my_databases, full_init=True)
             
     def init_query_dirs(self):
-        self.test_query_dir = resolve_project_root() / 'queries' / 'test'
         self.query_dir = resolve_project_root() / 'queries'
-        self.test_query_dir.mkdir(exist_ok=True)
+        self.test_query_dir = resolve_project_root() / 'queries' / 'test'
         self.query_dir.mkdir(exist_ok=True)
+        self.test_query_dir.mkdir(exist_ok=True)
 
     @property
     @abstractmethod
@@ -131,3 +131,12 @@ class SQLServer(Server):
         result = self.connection.execute(sa.text('SELECT name FROM sys.databases'))
         return [database[0] for database in result.fetchall()]
 
+if __name__ == '__main__':
+    import os
+    server = MariaDBServer(
+        server_name="crm-mysql-01.procarerx.com",
+        username=os.getenv('CRM_MY_SQL_USERNAME'),
+        password=os.getenv('CRM_MY_SQL_PASSWORD'),
+        port=int(os.getenv('CRM_MY_SQL_PORT', 3306)),
+    )
+    print(server.load_database_list())
