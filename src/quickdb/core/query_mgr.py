@@ -63,8 +63,9 @@ class SQLQueryManager:
         positions = self._find_clause_positions()
 
         if positions['where'] != -1:
-            # WHERE exists, add condition with AND
-            self.base_query = self.base_query.replace('WHERE', f'WHERE {condition} AND ')
+            # WHERE exists, add condition with AND after the WHERE keyword
+            pos = positions['where'] + len('WHERE ')
+            self.base_query = f'{self.base_query[:pos]}{condition} AND {self.base_query[pos:]}'
         else:
             # Find the first subsequent clause to insert before
             next_clauses = ['group_by', 'having', 'order_by']
