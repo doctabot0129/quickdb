@@ -21,8 +21,8 @@ class Server(ABC):
         password: str | None = None,
         port: int | None = None,
         database: str | None = None,
-        full_init: bool = False,
     ) -> None:
+
         self.conn_string: sa.URL = sa.URL.create(
             drivername=self.driver_name,
             host=server_name,
@@ -33,14 +33,14 @@ class Server(ABC):
         )
         self.engine: sa.Engine = sa.create_engine(self.conn_string)
         self.connection: sa.Connection = self.engine.connect()
-        self.all_databases_list = self.load_database_list()
         self.init_query_dirs()
-        
-        if full_init:
-            self.load_databases(self.my_databases, full_init=True)
-            
+
+        self._databases = {}
+
+        self._initialize_dbs()
+
     def init_query_dirs(self):
-        self.query_dir = resolve_project_root() / 'queries'
+        self.query_dir = resolve_project_root() / 'queries' / 'saved'
         self.test_query_dir = resolve_project_root() / 'queries' / 'test'
         self.query_dir.mkdir(exist_ok=True)
         self.test_query_dir.mkdir(exist_ok=True)
@@ -52,10 +52,10 @@ class Server(ABC):
 
     @property
     def my_databases(self) -> List[str]:
-        return []
+        return [self.engine.url.database] if self.engine.url.database else []
 
     @abstractmethod
-    def load_database_list(self) -> List[str]:
+    def get_available_dbs(self) -> List[str]:
         """Gathers name list of all databases on the server
 
         Returns:
@@ -63,25 +63,35 @@ class Server(ABC):
         """
         pass
 
-    def load_database(self, database_name: str, full_init: bool = False) -> None:
+    def _set_db_key(self, database_name: str, full_init: bool = False) -> None:
         """Loads a single database onto the server object
 
         Args:
             database_name (str): Database name to load
         """
-        setattr(
-            self,
-            database_name,
-            SQLDatabase(
-                connection=self.connection,
+        if database_name not in self._databases:
+            self._databases[database_name] = SQLDatabase(
+                server=self,
                 database_name=database_name,
                 full_init=full_init,
-            ),
-        )
+            )
 
-    def load_databases(self, database_list: List[str] | None = None, full_init: bool = False) -> None:
-        for database in (database_list or []):
-            self.load_database(database_name=database, full_init=full_init)
+    def _initialize_dbs(self) -> None:
+        available_dbs = self.get_available_dbs()
+
+        for db in self.my_databases:
+            if db in available_dbs:
+                self._set_db_key(db, full_init=True)
+            else:
+                logger.warning('Database %r not found in available databases: %r', db, available_dbs)
+        for db in set(available_dbs)-set(self.my_databases):
+            self._set_db_key(db, full_init=False)
+
+    def __getattr__(self, name) -> 'SQLDatabase':
+        try:
+            return self._databases[name]
+        except KeyError:
+            raise AttributeError(f"Database {name!r} not found on server {self.engine.url.host!r}")
 
     def close(self) -> None:
         self.connection.close()
@@ -111,7 +121,7 @@ class MariaDBServer(Server):
     def driver_name(self) -> str:
         return 'mysql+pymysql'
 
-    def load_database_list(self) -> List[str]:
+    def get_available_dbs(self) -> List[str]:
         """Gathers name list of all databases on the server
 
         Returns:
@@ -127,7 +137,7 @@ class SQLServer(Server):
     def driver_name(self) -> str:
         return 'mssql+pymssql'
 
-    def load_database_list(self) -> List[str]:
+    def get_available_dbs(self) -> List[str]:
         """Gathers name list of all databases on the server
 
         Returns:
@@ -139,6 +149,7 @@ class SQLServer(Server):
 
 if __name__ == '__main__':
     import os
+
     from dotenv import load_dotenv
     load_dotenv()
     with MariaDBServer(
@@ -147,4 +158,4 @@ if __name__ == '__main__':
         password=os.getenv('CRM_MY_SQL_PASSWORD'),
         port=int(os.getenv('CRM_MY_SQL_PORT', 3306)),
     ) as server:
-        print(server.load_database_list())
+        print(server.get_available_dbs())

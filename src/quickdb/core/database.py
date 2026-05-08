@@ -1,48 +1,69 @@
 import logging
-from typing import List
+from typing import TYPE_CHECKING, List
 
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.automap import AutomapBase, automap_base
 
-from quickdb.core.table import SQLTable
+if TYPE_CHECKING:
+    from quickdb.core.server import Server
 
 logger = logging.getLogger(__name__)
 
 
 class SQLDatabase:
+    """Wraps a single database schema, backed by its own AutomapBase.
+
+    Usage::
+
+        db.prepare(autoload_with=engine, schema=db.database_name)
+        row = session.query(db.classes.my_table).first()
+    """
+
     def __init__(
-        self, connection: sa.Connection, database_name: str, full_init: bool = False
+        self, server: 'Server', database_name: str, full_init: bool = False
     ) -> None:
-        self.connection: sa.Connection = connection
+        self.server: 'Server' = server
+        self.connection: sa.Connection = server.connection
         self.database_name: str = database_name
-        self.all_tables_list: List[str] = self.load_table_list()
+        # Each SQLDatabase owns its own AutomapBase so schemas don't collide.
+        self._base: AutomapBase = automap_base()
         if full_init:
-            self.load_tables(table_list=self.all_tables_list)
+            self.prepare(autoload_with=self.server.engine, schema=self.database_name)
+
+    # ------------------------------------------------------------------
+    # AutomapBase delegation
+    # ------------------------------------------------------------------
+
+    def prepare(
+        self,
+        autoload_with: sa.Engine | None = None,
+        schema: str | None = None,
+        **kwargs,
+    ) -> None:
+        """Reflect the schema and map all tables.
+
+        Delegates directly to the underlying ``AutomapBase.prepare()``, so any
+        keyword arguments accepted by SQLAlchemy are passed through.
+        """
+        self._base.prepare(
+            autoload_with=autoload_with or self.server.engine,
+            schema=schema or self.database_name,
+            **kwargs,
+        )
+
+    @property
+    def tables(self) -> dict[str, sa.Table]:
+        """Mapped table classes, e.g. ``db.tables.my_table``."""
+        return self._base.classes
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def load_table_list(self) -> List[str]:
         try:
-            result = self.connection.execute(
-                sa.text(f'SELECT name FROM {self.database_name}.sys.tables')
-            )
-            return [table[0] for table in result.fetchall()]
+            return sa.inspect(self.connection).get_table_names(schema=self.database_name)
         except SQLAlchemyError as e:
             logger.error('Failed to load table list for database %r: %s', self.database_name, e)
             raise
-
-    def load_table(self, table_name: str) -> None:
-        if table_name in self.all_tables_list:
-            setattr(
-                self,
-                table_name,
-                SQLTable(
-                    connection=self.connection,
-                    database_name=self.database_name,
-                    table_name=table_name,
-                ),
-            )
-        else:
-            raise KeyError(f'Table {table_name!r} not found in {self.database_name!r}')
-
-    def load_tables(self, table_list: List[str] | None = None) -> None:
-        for table in (table_list or []):
-            self.load_table(table_name=table)
