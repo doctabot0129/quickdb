@@ -180,6 +180,7 @@ from quickdb.scripts.stub_generator import StubGenerator
 
 class SuiteCRMServer(MariaDBServer):
     """Test double — represents a child server subclass."""
+    my_databases: list = []
 
 
 def _make_test_server() -> SuiteCRMServer:

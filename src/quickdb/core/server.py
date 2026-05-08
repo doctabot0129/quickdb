@@ -52,11 +52,7 @@ class Server(ABC):
 
     @property
     def my_databases(self) -> List[str]:
-        return getattr(self, '_my_databases', [])
-
-    @my_databases.setter
-    def my_databases(self, value: List[str]) -> None:
-        self._my_databases = value
+        return []
 
     @abstractmethod
     def load_database_list(self) -> List[str]:
