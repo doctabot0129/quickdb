@@ -1,4 +1,4 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List
 
@@ -14,7 +14,7 @@ from quickdb.core.utils import resolve_project_root
 load_dotenv() 
 
 
-class Server:
+class Server(ABC):
     def __init__(
         self,
         server_name: str,
