@@ -1,4 +1,4 @@
-from quickdb.scripts.stub_generator import _to_pascal_case, _class_to_filename
+from quickdb.scripts.stub_generator import _class_to_filename, _to_pascal_case
 
 
 def test_to_pascal_case_single_word():
@@ -38,12 +38,12 @@ from quickdb.scripts.stub_generator import _generate_table_stub
 
 def test_table_stub_class_name():
     result = _generate_table_stub('cases', ['id', 'name'])
-    assert 'class _CasesTable(SQLTable):' in result
+    assert 'class _CasesTable:' in result
 
 
 def test_table_stub_snake_case_name():
     result = _generate_table_stub('case_updates', ['id'])
-    assert 'class _CaseUpdatesTable(SQLTable):' in result
+    assert 'class _CaseUpdatesTable:' in result
 
 
 def test_table_stub_column_attrs():
@@ -124,7 +124,7 @@ def test_file_header_imports():
     result = _generate_file_header('quickdb.core.server', 'MariaDBServer')
     assert 'import pandas as pd' in result
     assert 'from typing import Literal' in result
-    assert 'from quickdb import SQLDatabase, SQLTable' in result
+    assert 'from quickdb import SQLDatabase' in result
     assert 'from quickdb.core.server import MariaDBServer' in result
 
 
@@ -163,6 +163,21 @@ def test_server_stub_empty_emits_pass():
     assert '    pass' in result
 
 
+def test_server_stub_init_suppresses_pass():
+    result = _generate_server_stub('MyServer', 'SQLServer', [], [], server_init='    def __init__(self) -> None: ...')
+    assert '    pass' not in result
+    assert 'def __init__' in result
+
+
+def test_server_stub_init_appears_before_db_attrs():
+    result = _generate_server_stub(
+        'MyServer', 'SQLServer', ['mydb'], [], server_init='    def __init__(self, cache_all: bool = False) -> None: ...'
+    )
+    init_pos = result.index('def __init__')
+    db_pos = result.index('mydb:')
+    assert init_pos < db_pos
+
+
 def test_server_stub_skips_keyword_db_names():
     result = _generate_server_stub('MyServer', 'SQLServer', ['mydb', 'from'], ['other', 'class'])
     assert '    mydb: _MydbDb' in result
@@ -171,7 +186,6 @@ def test_server_stub_skips_keyword_db_names():
     assert '    class: SQLDatabase' not in result
 
 
-import tempfile
 from unittest.mock import MagicMock, patch
 
 from quickdb.core.server import MariaDBServer
@@ -183,97 +197,87 @@ class SuiteCRMServer(MariaDBServer):
     my_databases: list = []
 
 
-def _make_test_server() -> SuiteCRMServer:
+def _make_mock_db(tables: dict[str, list[str]]) -> MagicMock:
+    """Build a mock SQLDatabase whose metadata contains the given tables and columns."""
+    mock_tables = []
+    for table_name, col_names in tables.items():
+        mt = MagicMock()
+        mt.name = table_name
+        mt.columns.keys.return_value = col_names
+        mock_tables.append(mt)
+    mock_db = MagicMock()
+    mock_db._base.metadata.tables.values.return_value = mock_tables
+    return mock_db
+
+
+def _make_test_server(
+    my_databases: list[str] | None = None,
+    available_dbs: list[str] | None = None,
+    deep_tables: dict[str, list[str]] | None = None,
+) -> SuiteCRMServer:
+    my_databases = my_databases if my_databases is not None else ['suitecrm']
+    available_dbs = available_dbs if available_dbs is not None else ['suitecrm', 'information_schema', 'mysql']
+    deep_tables = deep_tables if deep_tables is not None else {'cases': ['id', 'name']}
+
     inst = object.__new__(SuiteCRMServer)
-    inst.my_databases = ['suitecrm']
-    inst.all_databases_list = ['suitecrm', 'information_schema', 'mysql']
-    inst.connection = MagicMock()
+    inst.my_databases = my_databases
+    inst._databases = {db: _make_mock_db(deep_tables) for db in my_databases}
+    inst.get_available_dbs = lambda: available_dbs
     return inst
 
 
-def test_stub_generator_writes_pyi_file():
+def test_stub_generator_writes_pyi_file(tmp_path):
     server = _make_test_server()
-    with (
-        patch('quickdb.scripts.stub_generator.SQLDatabase') as MockDb,
-        patch('quickdb.scripts.stub_generator.SQLTable') as MockTable,
-        tempfile.TemporaryDirectory() as tmpdir,
-    ):
-        MockDb.return_value.all_tables_list = ['cases']
-        MockTable.return_value.all_columns_list = ['id', 'name']
-
-        output = StubGenerator(server, output_path=tmpdir).generate()
-
+    with patch('inspect.getfile', return_value=str(tmp_path / 'server.py')):
+        output = StubGenerator(server).generate()
         assert output.exists()
         assert output.suffix == '.pyi'
-        assert output.name == 'suite_crm_server.pyi'
+        assert output.name == 'server.pyi'
 
 
-def test_stub_generator_deep_db_in_output():
+def test_stub_generator_deep_db_in_output(tmp_path):
     server = _make_test_server()
-    with (
-        patch('quickdb.scripts.stub_generator.SQLDatabase') as MockDb,
-        patch('quickdb.scripts.stub_generator.SQLTable') as MockTable,
-        tempfile.TemporaryDirectory() as tmpdir,
-    ):
-        MockDb.return_value.all_tables_list = ['cases']
-        MockTable.return_value.all_columns_list = ['id', 'name']
-
-        output = StubGenerator(server, output_path=tmpdir).generate()
+    with patch('inspect.getfile', return_value=str(tmp_path / 'server.py')):
+        output = StubGenerator(server).generate()
         content = output.read_text()
-
-        assert 'class _CasesTable(SQLTable):' in content
+        assert 'class _CasesTable:' in content
         assert 'class _SuitecrmDb(SQLDatabase):' in content
         assert '    suitecrm: _SuitecrmDb' in content
         assert "Literal['id', 'name']" in content
 
 
-def test_stub_generator_surface_dbs_in_output():
+def test_stub_generator_surface_dbs_in_output(tmp_path):
     server = _make_test_server()
-    with (
-        patch('quickdb.scripts.stub_generator.SQLDatabase') as MockDb,
-        patch('quickdb.scripts.stub_generator.SQLTable') as MockTable,
-        tempfile.TemporaryDirectory() as tmpdir,
-    ):
-        MockDb.return_value.all_tables_list = ['cases']
-        MockTable.return_value.all_columns_list = ['id']
-
-        output = StubGenerator(server, output_path=tmpdir).generate()
+    with patch('inspect.getfile', return_value=str(tmp_path / 'server.py')):
+        output = StubGenerator(server).generate()
         content = output.read_text()
-
         assert '    information_schema: SQLDatabase' in content
         assert '    mysql: SQLDatabase' in content
         assert 'add to my_databases for full stubs' in content
 
 
-def test_stub_generator_correct_parent_import():
-    server = _make_test_server()
-    with (
-        patch('quickdb.scripts.stub_generator.SQLDatabase') as MockDb,
-        patch('quickdb.scripts.stub_generator.SQLTable') as MockTable,
-        tempfile.TemporaryDirectory() as tmpdir,
-    ):
-        MockDb.return_value.all_tables_list = []
-        MockTable.return_value.all_columns_list = []
-
-        output = StubGenerator(server, output_path=tmpdir).generate()
+def test_stub_generator_correct_parent_import(tmp_path):
+    server = _make_test_server(deep_tables={})
+    with patch('inspect.getfile', return_value=str(tmp_path / 'server.py')):
+        output = StubGenerator(server).generate()
         content = output.read_text()
-
         assert 'from quickdb.core.server import MariaDBServer' in content
         assert 'class SuiteCRMServer(MariaDBServer):' in content
 
 
-def test_stub_generator_returns_path_to_written_file():
-    server = _make_test_server()
-    with (
-        patch('quickdb.scripts.stub_generator.SQLDatabase') as MockDb,
-        patch('quickdb.scripts.stub_generator.SQLTable') as MockTable,
-        tempfile.TemporaryDirectory() as tmpdir,
-    ):
-        MockDb.return_value.all_tables_list = []
-        MockTable.return_value.all_columns_list = []
+def test_stub_generator_server_init_in_output(tmp_path):
+    server = _make_test_server(deep_tables={})
+    with patch('inspect.getfile', return_value=str(tmp_path / 'server.py')):
+        output = StubGenerator(server).generate()
+        content = output.read_text()
+        assert 'def __init__(self' in content
+        assert '-> None: ...' in content
 
-        result = StubGenerator(server, output_path=tmpdir).generate()
 
+def test_stub_generator_returns_path_to_written_file(tmp_path):
+    server = _make_test_server(deep_tables={})
+    with patch('inspect.getfile', return_value=str(tmp_path / 'server.py')):
+        result = StubGenerator(server).generate()
         assert result.is_absolute()
         assert result.exists()
 

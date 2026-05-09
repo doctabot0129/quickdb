@@ -1,4 +1,6 @@
 import logging
+import pickle
+from pathlib import Path
 from typing import TYPE_CHECKING, List
 
 import sqlalchemy as sa
@@ -12,13 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class SQLDatabase:
-    """Wraps a single database schema, backed by its own AutomapBase.
-
-    Usage::
-
-        db.prepare(autoload_with=engine, schema=db.database_name)
-        row = session.query(db.classes.my_table).first()
-    """
+    """Wraps a single database schema, backed by its own AutomapBase."""
 
     def __init__(
         self, server: 'Server', database_name: str, full_init: bool = False
@@ -26,40 +22,53 @@ class SQLDatabase:
         self.server: 'Server' = server
         self.connection: sa.Connection = server.connection
         self.database_name: str = database_name
-        # Each SQLDatabase owns its own AutomapBase so schemas don't collide.
         self._base: AutomapBase = automap_base()
+        self._prepared: bool = False
         if full_init:
-            self.prepare(autoload_with=self.server.engine, schema=self.database_name)
+            self.prepare()
 
-    # ------------------------------------------------------------------
-    # AutomapBase delegation
-    # ------------------------------------------------------------------
+    def prepare(self, force_refresh: bool = False) -> None:
+        """Reflect the schema and map tables, using pickle cache when available.
 
-    def prepare(
-        self,
-        autoload_with: sa.Engine | None = None,
-        schema: str | None = None,
-        **kwargs,
-    ) -> None:
-        """Reflect the schema and map all tables.
-
-        Delegates directly to the underlying ``AutomapBase.prepare()``, so any
-        keyword arguments accepted by SQLAlchemy are passed through.
+        Pass force_refresh=True to re-reflect and overwrite the cache.
         """
-        self._base.prepare(
-            autoload_with=autoload_with or self.server.engine,
-            schema=schema or self.database_name,
-            **kwargs,
-        )
+        cache_path = self._cache_path()
+        if not force_refresh and cache_path.exists():
+            with cache_path.open('rb') as f:
+                metadata = pickle.load(f)
+            self._base = automap_base(metadata=metadata)
+            self._base.prepare()
+        else:
+            self._base.prepare(
+                autoload_with=self.server.engine,
+                schema=self.database_name,
+            )
+            cache_path.parent.mkdir(exist_ok=True)
+            with cache_path.open('wb') as f:
+                pickle.dump(self._base.metadata, f)
+        self._prepared = True
+
+    def _cache_path(self) -> Path:
+        from quickdb.core.utils import resolve_project_root
+        host = self.server.engine.url.host or 'local'
+        return resolve_project_root() / '.quickdb_cache' / f'{host}_{self.database_name}.pkl'
 
     @property
-    def tables(self) -> dict[str, sa.Table]:
-        """Mapped table classes, e.g. ``db.tables.my_table``."""
+    def tables(self):
+        """Reflected table classes. Triggers prepare() on first access if not yet prepared."""
+        if not self._prepared:
+            self.prepare()
         return self._base.classes
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+    def __getattr__(self, name: str):
+        if name.startswith('_'):
+            raise AttributeError(name)
+        if not self._prepared:
+            self.prepare()
+        try:
+            return self._base.classes[name]
+        except (KeyError, AttributeError):
+            raise AttributeError(f"Table {name!r} not found in database {self.database_name!r}")
 
     def load_table_list(self) -> List[str]:
         try:

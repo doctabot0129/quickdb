@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import inspect
 import keyword
 import re
 from datetime import datetime
 from pathlib import Path
 
-from quickdb.core.database import SQLDatabase
-from quickdb.core.server import Server
-from quickdb.core.table import SQLTable
+from quickdb import Server, SQLDatabase
 
 
 def _to_pascal_case(name: str) -> str:
@@ -42,7 +41,7 @@ def _generate_table_stub(table_name: str, columns: list[str]) -> str:
     )
 
     body = f'{col_attrs}\n\n{method}' if col_attrs else method
-    return f'class {class_name}(SQLTable):\n{body}\n'
+    return f'class {class_name}:\n{body}\n'
 
 
 def _generate_database_stub(db_name: str, table_names: list[str]) -> str:
@@ -63,32 +62,38 @@ def _generate_file_header(parent_module: str, parent_class_name: str) -> str:
         f'\n'
         f'import pandas as pd\n'
         f'from typing import Literal\n'
-        f'from quickdb import SQLDatabase, SQLTable\n'
+        f'from quickdb import SQLDatabase\n'
         f'from {parent_module} import {parent_class_name}\n'
     )
 
 
 class StubGenerator:
-    def __init__(self, server: Server, output_path: str | Path) -> None:
+    def __init__(self, server: Server) -> None:
         self.server = server
-        self.output_path = Path(output_path)
+        self._server_file = Path(inspect.getfile(type(server)))
 
     def generate(self) -> Path:
         deep_schema: dict[str, dict[str, list[str]]] = {}
         for db_name in self.server.my_databases:
-            db = SQLDatabase(self.server.connection, db_name)
+            db: SQLDatabase = getattr(self.server, db_name)
             deep_schema[db_name] = {
-                table_name: SQLTable(self.server.connection, db_name, table_name).all_columns_list
-                for table_name in db.all_tables_list
+                table.name: list(table.columns.keys())
+                for table in db._base.metadata.tables.values()
             }
 
         surface_dbs = [
-            db for db in self.server.all_databases_list
+            db for db in self.server.get_available_dbs()
             if db not in self.server.my_databases
         ]
 
         parent_cls = type(self.server).__bases__[0]
         server_class_name = type(self.server).__name__
+
+        sig = inspect.signature(type(self.server))
+        clean_sig = sig.replace(return_annotation=inspect.Parameter.empty)
+        params_str = str(clean_sig)[1:-1]  # strip surrounding parens
+        init_sig = f'self, {params_str}' if params_str else 'self'
+        server_init = f'    def __init__({init_sig}) -> None: ...'
 
         content = self._build_content(
             server_class_name=server_class_name,
@@ -96,9 +101,10 @@ class StubGenerator:
             parent_module=parent_cls.__module__,
             deep_schema=deep_schema,
             surface_dbs=surface_dbs,
+            server_init=server_init,
         )
 
-        output_file = self.output_path / _class_to_filename(server_class_name)
+        output_file = self._server_file.with_suffix('.pyi')
         output_file.write_text(content, encoding='utf-8')
         return output_file
 
@@ -109,6 +115,7 @@ class StubGenerator:
         parent_module: str,
         deep_schema: dict[str, dict[str, list[str]]],
         surface_dbs: list[str],
+        server_init: str,
     ) -> str:
         sep = '─' * 50
         parts: list[str] = [_generate_file_header(parent_module, parent_class_name)]
@@ -126,6 +133,7 @@ class StubGenerator:
             parent_class_name=parent_class_name,
             deep_db_names=list(deep_schema.keys()),
             surface_db_names=surface_dbs,
+            server_init=server_init,
         ))
 
         return '\n'.join(parts)
@@ -136,11 +144,15 @@ def _generate_server_stub(
     parent_class_name: str,
     deep_db_names: list[str],
     surface_db_names: list[str],
+    server_init: str | None = None,
 ) -> str:
     safe_deep = [n for n in deep_db_names if n.isidentifier() and not keyword.iskeyword(n)]
     safe_surface = [n for n in surface_db_names if n.isidentifier() and not keyword.iskeyword(n)]
 
     lines = [f'class {server_class_name}({parent_class_name}):']
+
+    if server_init:
+        lines.append(server_init)
 
     if safe_deep:
         lines.append('    # fully stubbed')
@@ -152,7 +164,7 @@ def _generate_server_stub(
         for db_name in safe_surface:
             lines.append(f'    {db_name}: SQLDatabase')
 
-    if not safe_deep and not safe_surface:
+    if not server_init and not safe_deep and not safe_surface:
         lines.append('    pass')
 
     return '\n'.join(lines) + '\n'

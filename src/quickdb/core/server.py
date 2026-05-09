@@ -1,7 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List
+from typing import List, Self
 
 import pandas as pd
 import sqlalchemy as sa
@@ -21,6 +21,7 @@ class Server(ABC):
         password: str | None = None,
         port: int | None = None,
         database: str | None = None,
+        cache_all: bool = False,
     ) -> None:
 
         self.conn_string: sa.URL = sa.URL.create(
@@ -35,6 +36,7 @@ class Server(ABC):
         self.connection: sa.Connection = self.engine.connect()
         self.init_query_dirs()
 
+        self._cache_all = cache_all
         self._databases = {}
 
         self._initialize_dbs()
@@ -84,20 +86,22 @@ class Server(ABC):
                 self._set_db_key(db, full_init=True)
             else:
                 logger.warning('Database %r not found in available databases: %r', db, available_dbs)
-        for db in set(available_dbs)-set(self.my_databases):
-            self._set_db_key(db, full_init=False)
+        for db in set(available_dbs) - set(self.my_databases):
+            self._set_db_key(db, full_init=self._cache_all)
 
-    def __getattr__(self, name) -> 'SQLDatabase':
+    def __getattr__(self, name: str) -> 'SQLDatabase':
+        if name.startswith('_'):
+            raise AttributeError(name)
         try:
-            return self._databases[name]
+            return self.__dict__['_databases'][name]
         except KeyError:
-            raise AttributeError(f"Database {name!r} not found on server {self.engine.url.host!r}")
+            raise AttributeError(f"Database {name!r} not found on server")
 
     def close(self) -> None:
         self.connection.close()
         self.engine.dispose()
 
-    def __enter__(self) -> 'Server':
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -114,7 +118,6 @@ class Server(ABC):
         query_manager = self.get_query_mgr(sql_file_path)
         # sql_str = read_query(sql_file_path)
         return self.query_mgr_to_pandas(query_manager)
-
 
 class MariaDBServer(Server):
     @property
