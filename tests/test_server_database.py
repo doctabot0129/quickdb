@@ -1,10 +1,10 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from quickdb.core.database import SQLDatabase
-from quickdb.core.server import MariaDBServer
-
+from quickdb.core.server import MariaDBServer, Server
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -41,7 +41,7 @@ def _make_server(db_names: list[str] | None = None) -> MagicMock:
 
 def test_database_getattr_returns_table_when_prepared():
     db = _make_db(['accounts'])
-    result = db.accounts
+    _ = db.accounts
     db._base.classes.__getitem__.assert_called_once_with('accounts')
 
 
@@ -104,3 +104,68 @@ def test_server_getattr_raises_when_databases_not_initialised():
     server = object.__new__(MariaDBServer)
     with pytest.raises(AttributeError):
         _ = server.anything
+
+
+# ---------------------------------------------------------------------------
+# Server.sanitize_db_type
+# ---------------------------------------------------------------------------
+
+def test_sanitize_db_type_lowercases():
+    assert Server.sanitize_db_type('MariaDB') == 'mariadb'
+
+
+def test_sanitize_db_type_strips_hyphens():
+    assert Server.sanitize_db_type('maria-db') == 'mariadb'
+
+
+def test_sanitize_db_type_strips_underscores():
+    assert Server.sanitize_db_type('my_sql') == 'mysql'
+
+
+def test_sanitize_db_type_strips_spaces():
+    assert Server.sanitize_db_type('maria db') == 'mariadb'
+
+
+# ---------------------------------------------------------------------------
+# Server.driver_name
+# ---------------------------------------------------------------------------
+
+def _server_with_db_type(db_type: str) -> Server:
+    inst = object.__new__(Server)
+    inst.__dict__['db_type'] = db_type
+    return inst
+
+
+def test_driver_name_raises_value_error_for_unknown_type():
+    server = _server_with_db_type('oracle')
+    with pytest.raises(ValueError, match="Unsupported db_type 'oracle'"):
+        _ = server.driver_name
+
+
+def test_driver_name_returns_correct_driver_for_mariadb():
+    server = _server_with_db_type('mariadb')
+    assert server.driver_name == 'mysql+pymysql'
+
+
+def test_driver_name_returns_correct_driver_for_mssql():
+    server = _server_with_db_type('mssql')
+    assert server.driver_name == 'mssql+pymssql'
+
+
+# ---------------------------------------------------------------------------
+# Server.get_available_dbs
+# ---------------------------------------------------------------------------
+
+def _server_with_connection(db_type: str, execute_side_effect=None) -> Server:
+    inst = object.__new__(Server)
+    inst.__dict__['db_type'] = db_type
+    inst.connection = MagicMock()
+    if execute_side_effect:
+        inst.connection.execute.side_effect = execute_side_effect
+    return inst
+
+
+def test_get_available_dbs_reraises_sqlalchemy_error():
+    server = _server_with_connection('mariadb', execute_side_effect=SQLAlchemyError('connection refused'))
+    with pytest.raises(SQLAlchemyError):
+        server.get_available_dbs()
