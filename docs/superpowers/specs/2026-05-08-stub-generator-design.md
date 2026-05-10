@@ -1,7 +1,16 @@
 # Stub Generator Design
 
 **Date:** 2026-05-08
-**Status:** Approved
+**Status:** Superseded
+
+> **Note:** This document reflects the original approved design. The implementation diverged significantly during development. Key differences from the current codebase:
+> - `SQLTable` was removed; schema reflection now uses SQLAlchemy's `AutomapBase`
+> - `StubGenerator` no longer accepts `output_path`; the stub is always written next to the server's source file via `inspect.getfile`
+> - Table stub classes no longer inherit from `SQLTable`
+> - Generated stub imports `SQLDatabase` only (not `SQLTable`)
+> - `server.all_databases_list` replaced by `server.get_available_dbs()`
+> - Schema introspection uses `db._base.metadata.tables` instead of `get_column_list()` per table
+> - `Server` is no longer abstract; dialects are registered in `DRIVER_REGISTRY` / `DB_SELECT_REGISTRY`
 
 ## Overview
 

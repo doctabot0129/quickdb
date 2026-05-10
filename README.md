@@ -1,13 +1,16 @@
 # quickdb
 
-A lightweight Python foundation for connecting to SQL databases and running queries. Provides server connection management, database/table introspection, and a fluent SQL query builder.
+A lightweight Python wrapper for connecting to SQL databases. Provides server connection management, automatic schema reflection via SQLAlchemy's AutomapBase, and IDE autocomplete through generated `.pyi` stubs.
 
 ## Supported dialects
 
-| Dialect | Class |
-|---------|-------|
-| SQL Server | `SQLServer` |
-| MariaDB / MySQL | `MariaDBServer` |
+| Dialect | Convenience class | `db_type` string |
+|---------|-------------------|------------------|
+| SQL Server | `SQLServer` | `'mssql'` |
+| MariaDB | `MariaDBServer` | `'mariadb'` |
+| MySQL | `MySQLServer` | `'mysql'` |
+
+Any dialect supported by SQLAlchemy can be added via the registry — see [Adding a new dialect](#adding-a-new-dialect).
 
 ## Installation
 
@@ -15,59 +18,142 @@ A lightweight Python foundation for connecting to SQL databases and running quer
 pip install quickdb
 ```
 
-## Usage
-
-### Connecting to a server
-
-Use the server as a context manager to ensure the connection is always closed cleanly.
+## Quick start
 
 ```python
 import os
 from dotenv import load_dotenv
-from quickdb import SQLServer, MariaDBServer
+from quickdb import MariaDBServer
 
 load_dotenv()
 
-with SQLServer(
+with MariaDBServer(
     server_name='my-server',
     username=os.getenv('DB_USERNAME'),
     password=os.getenv('DB_PASSWORD'),
 ) as server:
+    df = server.my_database.my_table.all.fetchall()
+```
+
+## Connecting to a server
+
+Use a named subclass for the most common dialects:
+
+```python
+from quickdb import SQLServer, MariaDBServer, MySQLServer
+
+server = SQLServer(server_name='sql-01', username='...', password='...')
+server = MariaDBServer(server_name='mysql-01', username='...', password='...')
+server = MySQLServer(server_name='mysql-02', username='...', password='...')
+```
+
+Or use `Server` directly with a `db_type` string:
+
+```python
+from quickdb import Server
+
+server = Server(db_type='mariadb', server_name='mysql-01', username='...', password='...')
+```
+
+Always use the context manager to ensure the connection is closed cleanly:
+
+```python
+with MariaDBServer(server_name='...', username='...', password='...') as server:
     ...
 ```
 
-### Loading databases and tables
+## Accessing databases and tables
+
+quickdb reflects your schema automatically using SQLAlchemy's AutomapBase. Databases and tables are accessed via attribute notation:
 
 ```python
-with SQLServer(server_name='my-server', username='...', password='...') as server:
-    # Inspect available databases
-    print(server.all_databases_list)
+# Access a database
+db = server.my_database
 
-    # Load a single database
-    server.load_database('my_database')
-
-    # Load a table from that database
-    server.my_database.load_table('orders')
-
-    # Inspect available columns
-    print(server.my_database.orders.all_columns_list)
+# Access a table (triggers schema reflection on first access)
+table = server.my_database.orders
 ```
 
-### Running a quick query
+### Controlling which databases are fully reflected
 
-`limited_query` returns a Pandas DataFrame and accepts optional field selection and WHERE conditions.
+By default only the database passed in the connection string is fully reflected. Override `my_databases` on a subclass to control this:
 
 ```python
-df = server.my_database.orders.limited_query(
-    fields=['order_id', 'customer_id', 'order_date'],
-    where=["status = 'active'"],
-    limit=100,
-)
+from quickdb import MariaDBServer
+
+class MyServer(MariaDBServer):
+    def __init__(self, **kwargs):
+        super().__init__(server_name='my-server', **kwargs)
+
+    @property
+    def my_databases(self):
+        return ['sales', 'inventory']
 ```
 
-### SQLQueryManager
+Databases listed in `my_databases` are fully reflected (and cached) at connection time. All other available databases are registered lazily and reflected on first access.
 
-`SQLQueryManager` provides a fluent interface for building and modifying SQL queries loaded from `.sql` files.
+To eagerly reflect and cache all databases on the server, pass `cache_all=True`:
+
+```python
+with MyServer(cache_all=True) as server:
+    ...
+```
+
+### Schema cache
+
+Reflected metadata is cached as pickle files under `.quickdb_cache/` in your project root. This avoids re-reflecting on every run. To force a refresh:
+
+```python
+server.my_database.prepare(force_refresh=True)
+```
+
+## Generating IDE stubs
+
+`StubGenerator` connects to a live server instance and writes a `.pyi` stub file next to the server's source file, giving IDEs full autocomplete across the `server → database → table → column` hierarchy.
+
+```python
+from dotenv import load_dotenv
+from quickdb import StubGenerator
+from mypackage.server import MyServer
+
+load_dotenv()
+
+with MyServer() as server:
+    StubGenerator(server).generate()
+```
+
+The stub is written to `<server_module>.pyi` alongside the server's `.py` file. Run this script whenever your schema changes.
+
+## Adding a new dialect
+
+Add entries to both registries in `quickdb/core/server.py`:
+
+```python
+from quickdb.core.server import DRIVER_REGISTRY, DB_SELECT_REGISTRY
+
+DRIVER_REGISTRY['postgres'] = 'postgresql+psycopg2'
+DB_SELECT_REGISTRY['postgres'] = 'SELECT datname FROM pg_database'
+```
+
+Then connect with:
+
+```python
+server = Server(db_type='postgres', server_name='pg-01', username='...', password='...')
+```
+
+Or create a named subclass for convenience:
+
+```python
+from quickdb import Server
+
+class PostgreSQLServer(Server):
+    def __init__(self, server_name, **kwargs):
+        super().__init__(db_type='postgres', server_name=server_name, **kwargs)
+```
+
+## SQLQueryManager
+
+`SQLQueryManager` provides a fluent interface for modifying SQL queries loaded from `.sql` files.
 
 ```python
 from quickdb import SQLQueryManager
@@ -100,27 +186,9 @@ Available methods:
 | `insert_values_into_table(name, values)` | Populate a table variable declared in the query |
 | `get_query()` | Return the final query string |
 
-### Subclassing Server
-
-To add a new dialect, subclass `Server` and implement `driver_name` and `load_database_list`.
-
-```python
-from quickdb.core.server import Server
-import sqlalchemy as sa
-
-class PostgreSQLServer(Server):
-    @property
-    def driver_name(self) -> str:
-        return 'postgresql+psycopg2'
-
-    def load_database_list(self) -> list[str]:
-        result = self.connection.execute(sa.text('SELECT datname FROM pg_database'))
-        return [row[0] for row in result.fetchall()]
-```
-
 ## Environment variables
 
-quickdb does not call `load_dotenv()` automatically. Load your `.env` file in your script before constructing a server instance.
+quickdb does not call `load_dotenv()` automatically. Load your `.env` file before constructing a server instance:
 
 ```python
 from dotenv import load_dotenv
