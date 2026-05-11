@@ -119,6 +119,20 @@ class Server:
         for db in set(available_dbs) - set(self.my_databases):
             self._set_db_key(db, full_init=self._cache_all)
 
+    def refresh(self, db_name: str | None = None) -> None:
+        """Re-reflect schema from the live database, bypassing the pickle cache.
+
+        Args:
+            db_name: Database to refresh. If None, refreshes all loaded databases.
+        """
+        if db_name is not None:
+            if db_name not in self._databases:
+                self._set_db_key(db_name, full_init=False)
+            self._databases[db_name].prepare(force_refresh=True)
+        else:
+            for db in self._databases.values():
+                db.prepare(force_refresh=True)
+
     def __getattr__(self, name: str) -> 'SQLDatabase':
         if name.startswith('_'):
             raise AttributeError(name)
