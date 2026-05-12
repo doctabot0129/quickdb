@@ -56,7 +56,7 @@ class Server:
         self.init_query_dirs()
 
         self._cache_all = cache_all
-        self._databases = {}
+        self._databases: dict[str, SQLDatabase] = {}
 
         self._initialize_dbs()
 
